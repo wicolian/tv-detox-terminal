@@ -1,3 +1,31 @@
+# TV Detox: Terminal edition
+
+A fork of [Ansub/tv-detox](https://github.com/Ansub/tv-detox) with three additions to its home screen:
+
+- **Terminal look.** Pick the `Terminal` wallpaper (or `--es wallpaper Terminal`): a shell prompt over the
+  clock, a blinking block cursor, green monospace text and faint scanlines. App logos keep their own
+  colours, because that is how you find an app from the sofa.
+- **Matrix screensaver.** Code rain with a small clock, drawn at half resolution so a slow TV keeps up.
+  `adb shell settings put secure screensaver_components com.ansub.tvhome/.MatrixDream`
+- **Agents panel.** A glance at the Claude Code and Codex agents [boxdeck](https://github.com/wicolian/boxdeck)
+  sees, over Tailscale: per machine, how many are working, how many are waiting for you, and the
+  Claude 5-hour quota with today's cost. Use a **read-only** boxdeck token (`boxdeck token new --read-only tv`),
+  never a full one: a full token can run commands on the box.
+
+  ```sh
+  adb shell am start -n com.ansub.tvhome/.MainActivity \
+    --es boxdeck_url http://<box tailscale ip>:8100 --es boxdeck_token bdr_...
+  ```
+
+  The panel is off until both are set, and `--es boxdeck_url none` turns it off again. This build asks
+  for the internet permission for the panel only; upstream's home screen has none.
+
+![Terminal home screen](docs/terminal-home.png)
+
+Build with `sh build.sh` (Java 17, Android SDK 34). Everything below is the upstream README.
+
+---
+
 <div align="center">
 
 # TV Detox

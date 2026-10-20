@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.ansub.tvhome" android:versionCode="13" android:versionName="1.5.0">
+    package="com.ansub.tvhome" android:versionCode="14" android:versionName="1.5.0-terminal">
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34" />
     <!-- Only for the network tile: Wi-Fi, Ethernet or offline, and the Wi-Fi signal. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Only for the agents panel: reads boxdeck over the tailnet. Off until a boxdeck URL is set. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Android 11+ only shows apps a home screen asks to see: TV apps and normal apps. -->
     <queries>
         <intent>
@@ -29,7 +31,8 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
-    <application android:label="Home" android:allowBackup="false"
+    <!-- Cleartext is for boxdeck on the tailnet (plain http inside WireGuard). -->
+    <application android:label="Home" android:allowBackup="false" android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
         <activity android:name=".MainActivity"
             android:exported="true"
@@ -43,5 +46,13 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <!-- Matrix code rain, offered as a screensaver in Settings > Screensaver. -->
+        <service android:name=".MatrixDream" android:exported="true" android:label="Matrix"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

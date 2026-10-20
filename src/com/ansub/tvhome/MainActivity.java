@@ -99,8 +99,12 @@ public class MainActivity extends Activity {
     // the bottom right. Dark ones first, then bright ones that get darker towards the bottom, so the
     // white labels stay easy to read. Only colours, no images, so every one costs the same as Dusk,
     // the default.
+    // Terminal is more than a wallpaper: green phosphor text in a monospace font, green-tinted app
+    // banners and a prompt over the clock. Picking it (or leaving it) restarts the page in that look.
+    private static final String TERMINAL = "Terminal";
+    static final int PHOSPHOR = 0xFF39FF7A;
     private static final String[] WALLPAPER_NAMES = {"Dusk", "Midnight", "Plum", "Forest", "Graphite", "Ocean", "Ember",
-            "Sunset", "Lagoon", "Aurora", "Coral", "Iris", "Meadow", "Gold"};
+            "Sunset", "Lagoon", "Aurora", "Coral", "Iris", "Meadow", "Gold", TERMINAL};
     private static final int[][] WALLPAPERS = {
         {0xFF15100F, 0xFF0A0809, 0xFF050405, 0x36FF8048, 0x2EAA3C8C},
         {0xFF0E1220, 0xFF080A13, 0xFF040509, 0x384A6CFF, 0x2E5A3CC8},
@@ -116,10 +120,24 @@ public class MainActivity extends Activity {
         {0xFF5A3CAE, 0xFF3A2A84, 0xFF16123A, 0x90C080FF, 0x804A7CFF},
         {0xFF2E6E4C, 0xFF1C4A40, 0xFF0A201E, 0x90A8E070, 0x6030A8A8},
         {0xFFB07624, 0xFF86401E, 0xFF2A1410, 0x90FFD060, 0x70FF5040},
+        {0xFF040605, 0xFF020303, 0xFF000000, 0x1239FF7A, 0x0A00C060},
     };
     private float scale = 1f;
 
     private static Typeface regular, semibold;
+    // The page's colours: white glass, or green phosphor in the Terminal look.
+    private boolean term;
+    private int fg = Color.WHITE, fgSoft = 0xE0FFFFFF, fgDim = 0xA8FFFFFF, fill = 0x13FFFFFF, fillOn = 0x38FFFFFF,
+            edge = 0x17FFFFFF, panelBg = 0xFF161113, dropBg = 0xFF231D1F;
+    private TextView cursor; // the blinking block after the time, Terminal only
+    private AgentsPanel agents; // boxdeck glance, when set up
+    private final Runnable blink = new Runnable() {
+        @Override public void run() {
+            if (cursor == null) return;
+            cursor.setVisibility(cursor.getVisibility() == View.VISIBLE ? View.INVISIBLE : View.VISIBLE);
+            cursor.postDelayed(this, 530);
+        }
+    };
 
     private FrameLayout root; // the page, inside a vertical scroller
     private int tileW, tileH, gridTop; // app grid geometry, set by buildTiles
@@ -161,7 +179,13 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         saveConfig(getIntent());
-        loadFonts();
+        term = TERMINAL.equals(WALLPAPER_NAMES[wallpaper()]);
+        loadFonts(term);
+        if (term) {
+            // Green is the one accent. Text steps down in alpha; surfaces stay near black, edges faint.
+            fg = PHOSPHOR; fgSoft = 0xC839FF7A; fgDim = 0x7839FF7A; fill = 0x08FFFFFF; fillOn = 0x1F39FF7A;
+            edge = 0x1F39FF7A; panelBg = 0xFF050706; dropBg = 0xFF0A0D0B;
+        }
         scale = getResources().getDisplayMetrics().widthPixels / 1920f;
         showWallpaper(wallpaper());
 
@@ -178,18 +202,50 @@ public class MainActivity extends Activity {
         clock.setOrientation(LinearLayout.VERTICAL);
         shownLocale = java.util.Locale.getDefault();
         String day = Strings.datePattern();
-        TextClock date = clock(day, day, px(30), 0xA8FFFFFF, regular);
-        TextClock time = clock("h:mm", "H:mm", px(176), Color.WHITE, semibold);
-        time.setLetterSpacing(-0.028f);
+        TextClock date = clock(day, day, px(30), fgDim, regular);
+        TextClock time = clock("h:mm", "H:mm", px(term ? 160 : 176), fg, semibold);
+        time.setLetterSpacing(term ? 0f : -0.028f);
         time.setFontFeatureSettings("tnum");
         time.setIncludeFontPadding(false);
+        if (term) {
+            TextView prompt = text(px(30), fg, regular);
+            prompt.setText(prompt() + " date");
+            prompt.setSingleLine(true);
+            clock.addView(prompt);
+        }
         clock.addView(date);
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
-        tp.topMargin = px(-20); // pull the big digits up under the date
-        clock.addView(time, tp);
-        root.addView(clock, at(px(MARGIN), px(92), -2, -2));
+        tp.topMargin = px(term ? 8 : -20); // pull the big digits up under the date
+        if (term) {
+            LinearLayout line = new LinearLayout(this);
+            line.setGravity(Gravity.BOTTOM);
+            line.setBaselineAligned(false); // the block has no text, so no baseline to line up
+            line.addView(time);
+            // A block as tall as the digits, sitting on their baseline.
+            cursor = new TextView(this);
+            cursor.setBackgroundColor(fg);
+            android.graphics.Paint.FontMetrics fm = time.getPaint().getFontMetrics();
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(px(72), px(116));
+            cp.leftMargin = px(18);
+            cp.bottomMargin = Math.round(fm.descent);
+            line.addView(cursor, cp);
+            clock.addView(line, tp);
+        } else {
+            clock.addView(time, tp);
+        }
+        // Terminal: as wide as the prompt line can be, so it is never cut to the width of the time.
+        root.addView(clock, at(px(MARGIN), px(term ? 72 : 92), term ? px(1100) : -2, -2));
 
-        moveHint = text(px(24), 0xA8FFFFFF, regular);
+        // Agents panel in the empty space right of the clock, only once boxdeck is set up.
+        if (AgentsPanel.configured(getSharedPreferences(PREFS, 0))) {
+            agents = new AgentsPanel(this, getSharedPreferences(PREFS, 0), fg, fgSoft, fgDim, px(26), regular, semibold);
+            FrameLayout.LayoutParams ap = new FrameLayout.LayoutParams(px(820), -2, Gravity.TOP | Gravity.END);
+            ap.rightMargin = px(MARGIN);
+            ap.topMargin = px(176);
+            root.addView(agents, ap);
+        }
+
+        moveHint = text(px(24), fgDim, regular);
         moveHint.setText(Strings.t("Use the arrows to move it, then press OK"));
         moveHint.setVisibility(View.GONE);
         root.addView(moveHint, at(px(MARGIN), px(ROW1_TOP - 64), -2, -2));
@@ -233,6 +289,27 @@ public class MainActivity extends Activity {
     private boolean saveConfig(Intent intent) {
         String apps = intent == null ? null : intent.getStringExtra("apps");
         String quick = intent == null ? null : intent.getStringExtra("quick");
+        // --es boxdeck_url http://100.x.y.z:8100 --es boxdeck_token bdr_...  turns on the agents panel;
+        // --es boxdeck_url none  turns it off.
+        String deckUrl = intent == null ? null : intent.getStringExtra(AgentsPanel.URL_KEY);
+        String deckToken = intent == null ? null : intent.getStringExtra(AgentsPanel.TOKEN_KEY);
+        if (deckUrl != null || deckToken != null) {
+            SharedPreferences.Editor e = getSharedPreferences(PREFS, 0).edit();
+            if (deckUrl != null && deckUrl.trim().equalsIgnoreCase("none")) e.remove(AgentsPanel.URL_KEY).remove(AgentsPanel.TOKEN_KEY);
+            else {
+                if (deckUrl != null) e.putString(AgentsPanel.URL_KEY, deckUrl.trim().replaceAll("/+$", ""));
+                if (deckToken != null) e.putString(AgentsPanel.TOKEN_KEY, deckToken.trim());
+            }
+            e.commit();
+            if (root != null) recreate();
+        }
+        // --es wallpaper Terminal  picks a wallpaper by name, like the Wallpaper menu does.
+        String paper = intent == null ? null : intent.getStringExtra("wallpaper");
+        if (paper != null && Arrays.asList(WALLPAPER_NAMES).contains(paper)
+                && !paper.equals(getSharedPreferences(PREFS, 0).getString("wallpaper", null))) {
+            getSharedPreferences(PREFS, 0).edit().putString("wallpaper", paper).commit();
+            if (root != null) recreate();
+        }
         if (apps == null && quick == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
@@ -286,6 +363,23 @@ public class MainActivity extends Activity {
         refreshNetwork();
         View f = getCurrentFocus();
         if (f == null && !tiles.isEmpty()) tiles.get(0).requestFocus();
+        if (cursor != null) { cursor.removeCallbacks(blink); cursor.postDelayed(blink, 530); }
+        if (agents != null) agents.start();
+    }
+
+    @Override
+    protected void onPause() {
+        if (cursor != null) cursor.removeCallbacks(blink);
+        if (agents != null) agents.stop();
+        super.onPause();
+    }
+
+    // A shell prompt from the TV's name: "Family room TV" gives "root@family-room-tv:~$".
+    private String prompt() {
+        String name = Settings.Global.getString(getContentResolver(), "device_name");
+        if (name == null || name.trim().isEmpty()) name = "tv";
+        name = name.trim().toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+        return "root@" + name + ":~$";
     }
 
     // Back from a menu or a window on top (like the uninstall prompt): catch up on apps that changed.
@@ -331,8 +425,20 @@ public class MainActivity extends Activity {
     }
 
     private void showWallpaper(int i) {
-        getWindow().setBackgroundDrawable(background(WALLPAPERS[i]));
+        Drawable bg = background(WALLPAPERS[i]);
+        if (TERMINAL.equals(WALLPAPER_NAMES[i])) bg = new LayerDrawable(new Drawable[] {bg, scanlines()});
+        getWindow().setBackgroundDrawable(bg);
     }
+
+    // Faint CRT lines, one in every three rows: a 1x3 bitmap tiled over the screen, drawn once.
+    private Drawable scanlines() {
+        Bitmap b = Bitmap.createBitmap(1, 3, Bitmap.Config.ARGB_8888);
+        b.setPixel(0, 0, 0x0C39FF7A);
+        BitmapDrawable d = new BitmapDrawable(getResources(), b);
+        d.setTileModeXY(android.graphics.Shader.TileMode.REPEAT, android.graphics.Shader.TileMode.REPEAT);
+        return d;
+    }
+
 
     // The wallpapers, each with a small dot of its colours. Moving through the list shows each one
     // behind the panel; OK keeps it, Back goes back to the one before.
@@ -347,8 +453,9 @@ public class MainActivity extends Activity {
             dot.setSize(size, size);
             return dot;
         }, size, wallpaper(), this::showWallpaper, which -> {
-            getSharedPreferences(PREFS, 0).edit().putString("wallpaper", WALLPAPER_NAMES[which]).apply();
+            getSharedPreferences(PREFS, 0).edit().putString("wallpaper", WALLPAPER_NAMES[which]).commit();
             showWallpaper(which);
+            if (TERMINAL.equals(WALLPAPER_NAMES[which]) != term) recreate();
         });
     }
 
@@ -464,14 +571,22 @@ public class MainActivity extends Activity {
         final GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(px(RADIUS));
         if (banner != null) {
-            bg.setColor(0xFF1E1A1C);
+            bg.setColor(term ? Color.BLACK : 0xFF1E1A1C);
             ImageView iv = new ImageView(this);
+            // Banners keep their own colours, even in Terminal: people find an app by its logo.
             iv.setImageDrawable(fit(banner, w, h));
             card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+            // In Terminal the banner sits in a faint green frame, drawn over it, that lights up on focus.
+            if (term) {
+                GradientDrawable frame = new GradientDrawable();
+                frame.setCornerRadius(px(RADIUS));
+                frame.setStroke(Math.max(1, px(2)), edge);
+                card.setForeground(frame);
+            }
         } else {
             // Quiet "glass" tile: icon above label.
-            bg.setColor(0x13FFFFFF);
-            bg.setStroke(Math.max(1, px(2)), 0x17FFFFFF);
+            bg.setColor(fill);
+            bg.setStroke(Math.max(1, px(2)), edge);
             LinearLayout inner = new LinearLayout(this);
             inner.setOrientation(LinearLayout.VERTICAL);
             inner.setGravity(Gravity.CENTER);
@@ -479,8 +594,9 @@ public class MainActivity extends Activity {
             int size = lineIcon != null ? px(44) : px(64);
             if (lineIcon != null) iv.setImageDrawable(new LineIcon(lineIcon));
             else if (appIcon != null) iv.setImageDrawable(fit(appIcon, size, size));
+            if (term && lineIcon != null) iv.setColorFilter(fg);
             inner.addView(iv, new LinearLayout.LayoutParams(size, size));
-            TextView t = text(px(24), 0xE0FFFFFF, regular);
+            TextView t = text(px(24), fgSoft, regular);
             t.setText(label);
             t.setSingleLine(true);
             t.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -497,9 +613,9 @@ public class MainActivity extends Activity {
         card.setTag(key);
 
         // Banner tiles show their name underneath when focused.
-        final TextView caption = banner == null ? null : text(px(24), Color.WHITE, regular);
+        final TextView caption = banner == null ? null : text(px(24), fg, regular);
         if (caption != null) {
-            caption.setText(label);
+            caption.setText(term ? "> " + label.toLowerCase(java.util.Locale.ROOT) + "_" : label);
             caption.setGravity(Gravity.CENTER_HORIZONTAL);
             caption.setVisibility(View.INVISIBLE);
         }
@@ -507,7 +623,11 @@ public class MainActivity extends Activity {
         final boolean glass = banner == null;
         card.setOnFocusChangeListener((v, has) -> {
             if (has) focusedKey = key;
-            if (glass) bg.setColor(has ? 0x38FFFFFF : 0x13FFFFFF);
+            if (glass) bg.setColor(has ? fillOn : fill);
+            if (term) {
+                GradientDrawable ring = glass ? bg : (GradientDrawable) ((FrameLayout) v).getForeground();
+                if (ring != null) ring.setStroke(Math.max(1, px(has ? 4 : 2)), has ? fg : edge);
+            }
             v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).translationZ(has ? px(26) : 0)
                     .setDuration(140).withLayer().start();
             if (caption != null) caption.setVisibility(has ? View.VISIBLE : View.INVISIBLE);
@@ -566,13 +686,14 @@ public class MainActivity extends Activity {
         card.setBackground(bg);
         ImageView iv = new ImageView(this);
         iv.setImageDrawable(icon);
+        if (term) iv.setColorFilter(fg);
         card.addView(iv, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
         card.setFocusable(true);
         card.setTag(key);
         card.setContentDescription(label);
         card.setOnFocusChangeListener((v, has) -> {
             if (has) focusedKey = key;
-            bg.setColor(has ? 0x38FFFFFF : Color.TRANSPARENT);
+            bg.setColor(has ? fillOn : Color.TRANSPARENT);
             v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).setDuration(140).withLayer().start();
         });
         card.setOnClickListener(v -> open(key));
@@ -767,8 +888,8 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(px(48), px(92), px(48), px(48));
 
-        TextView head = text(px(40), Color.WHITE, semibold);
-        head.setText(title);
+        TextView head = text(px(40), fg, semibold);
+        head.setText(term ? "$ " + title.toLowerCase(java.util.Locale.ROOT) : title);
         head.setSingleLine(true);
         head.setEllipsize(android.text.TextUtils.TruncateAt.END);
         head.setPadding(px(24), 0, px(24), 0);
@@ -780,7 +901,7 @@ public class MainActivity extends Activity {
         list.setOverScrollMode(View.OVER_SCROLL_NEVER);
         GradientDrawable focus = new GradientDrawable();
         focus.setCornerRadius(px(RADIUS));
-        focus.setColor(0x38FFFFFF);
+        focus.setColor(fillOn);
         list.setSelector(focus);
         // Icons load as rows appear, drawn small to save RAM.
         final Drawable[] icons = new Drawable[labels.size()];
@@ -789,7 +910,7 @@ public class MainActivity extends Activity {
             @Override public Object getItem(int pos) { return labels.get(pos); }
             @Override public long getItemId(int pos) { return pos; }
             @Override public View getView(int pos, View convert, ViewGroup parent) {
-                TextView t = convert != null ? (TextView) convert : text(px(30), 0xE6FFFFFF, regular);
+                TextView t = convert != null ? (TextView) convert : text(px(30), fgSoft, regular);
                 t.setText(labels.get(pos));
                 t.setSingleLine(true);
                 t.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -826,7 +947,7 @@ public class MainActivity extends Activity {
 
         d.setContentView(box);
         Window w = d.getWindow();
-        w.setBackgroundDrawable(new ColorDrawable(preview != null ? 0xFF161113 : 0xF7161113));
+        w.setBackgroundDrawable(new ColorDrawable(preview != null ? panelBg : (panelBg & 0x00FFFFFF) | 0xF7000000));
         w.setLayout(px(640), -1);
         w.setGravity(Gravity.END);
         w.setDimAmount(preview != null ? 0f : 0.5f); // a preview needs the home screen undimmed
@@ -843,13 +964,13 @@ public class MainActivity extends Activity {
         box.setPadding(pad, pad, pad, pad);
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(px(RADIUS));
-        bg.setColor(0xFF231D1F);
-        bg.setStroke(Math.max(1, px(2)), 0x17FFFFFF);
+        bg.setColor(dropBg);
+        bg.setStroke(Math.max(1, px(2)), edge);
         box.setBackground(bg);
         float widest = 0; // some languages need more room than the tile is wide
         for (int i = 0; i < items.length; i++) {
             final int which = i;
-            final TextView t = text(px(26), 0xD9FFFFFF, regular);
+            final TextView t = text(px(26), fgSoft, regular);
             t.setText(Strings.t(items[i]));
             t.setSingleLine(true);
             t.setGravity(Gravity.CENTER_VERTICAL);
@@ -861,8 +982,8 @@ public class MainActivity extends Activity {
             t.setBackground(focus);
             t.setFocusable(true);
             t.setOnFocusChangeListener((v, has) -> {
-                focus.setColor(has ? 0x38FFFFFF : Color.TRANSPARENT);
-                t.setTextColor(has ? Color.WHITE : 0xD9FFFFFF);
+                focus.setColor(has ? fillOn : Color.TRANSPARENT);
+                t.setTextColor(has ? fg : fgSoft);
             });
             t.setOnClickListener(v -> {
                 d.dismiss();
@@ -983,7 +1104,7 @@ public class MainActivity extends Activity {
         movingKey = key;
         GradientDrawable outline = new GradientDrawable();
         outline.setCornerRadius(px(RADIUS));
-        outline.setStroke(px(4), Color.WHITE);
+        outline.setStroke(px(4), fg);
         ((FrameLayout) card).setForeground(outline);
         moveHint.setVisibility(View.VISIBLE);
         card.requestFocus();
@@ -1068,8 +1189,13 @@ public class MainActivity extends Activity {
     }
 
     // Xiaomi TVs ship MiLan Pro but don't register it by name; every other TV gets Roboto.
-    private static void loadFonts() {
-        if (regular != null) return;
+    // Terminal uses the system monospace font instead.
+    private static void loadFonts(boolean mono) {
+        if (mono) {
+            regular = Typeface.MONOSPACE;
+            semibold = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD);
+            return;
+        }
         regular = fromFile("/system/fonts/MILanPro_Normal.ttf", Typeface.create("sans-serif", Typeface.NORMAL));
         semibold = fromFile("/system/fonts/MILanPro_SemiBold.ttf", Typeface.create("sans-serif-medium", Typeface.NORMAL));
     }
